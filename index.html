@@ -137,6 +137,26 @@
   .chip.eliminated { color: #251515; border-color: #1a0f0f; text-decoration: line-through; cursor: default; }
   .pick-tag { display: inline-block; padding: 3px 11px; border-radius: 20px; background: #1f0c0c; border: 1px solid #3a1a1a; font-size: 12px; color: #c4906a; margin: 2px; }
 
+
+  /* ─── EPISODE DROPDOWN FORM ─────────────────────── */
+  .ep-section-label { font-size:11px; letter-spacing:3px; color:var(--accent); text-transform:uppercase; margin-bottom:10px; }
+  .ep-dropdown-grid { display:flex; flex-direction:column; gap:8px; }
+  .ep-dropdown-row { display:flex; align-items:center; gap:12px; }
+  .ep-dropdown-label { font-size:13px; color:var(--text2); width:110px; flex-shrink:0; display:flex; align-items:center; gap:6px; }
+  .ep-pts { font-size:11px; border-radius:10px; padding:1px 6px; }
+  .ep-pts.pos { background:#0f2a0f; color:var(--green2); }
+  .ep-pts.neg { background:#2a0f0f; color:var(--red2); }
+  .ep-select {
+    flex:1; padding:8px 12px; background:var(--bg); border:1px solid var(--border2);
+    border-radius:5px; color:var(--text); font-family:'Crimson Text', serif; font-size:14px;
+    cursor:pointer; appearance:none; -webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%235a4030' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+    background-repeat:no-repeat; background-position:right 12px center;
+    padding-right:32px;
+  }
+  .ep-select:focus { outline:none; border-color:var(--accent); }
+  .ep-select option { background:var(--bg2); color:var(--text); }
+
   /* ─── EPISODES ─────────────────────────────────── */
   .event-grid { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
   .event-btn { padding: 4px 11px; border-radius: 4px; border: 1px solid var(--border2); background: transparent; color: var(--text3); font-family: 'Crimson Text', serif; font-size: 12px; cursor: pointer; transition: all 0.15s; }
@@ -329,10 +349,12 @@
       <!-- Manual Episode Form -->
       <div id="add-episode-form" class="inline-form" style="display:none;">
         <div class="form-title">Log New Episode</div>
-        <input type="text" id="new-episode-input" placeholder="e.g. Episode 4 — Restaurant Wars" style="width:100%;margin-bottom:16px;">
-        <div style="font-size:10px;letter-spacing:3px;color:var(--text3);text-transform:uppercase;margin-bottom:12px;">Mark events for each chef:</div>
-        <div class="ep-events-scroll" id="episode-chef-events"></div>
-        <div class="form-row" style="margin-top:16px;">
+        <input type="text" id="new-episode-input" placeholder="e.g. Episode 4 — Restaurant Wars" style="width:100%;margin-bottom:20px;">
+
+        <!-- Dropdowns built by populateDropdowns() -->
+        <div id="episode-dropdowns"></div>
+
+        <div class="form-row" style="margin-top:20px;">
           <button class="btn" onclick="saveEpisode()">Save Episode</button>
           <button class="btn-ghost" onclick="cancelEpisode()">Cancel</button>
         </div>
@@ -834,42 +856,121 @@ window.confirmAiSuggestion = function() {
 };
 
 // ─── EPISODES (MANUAL) ────────────────────────────────────
-function renderEpisodeChefList() {
-  pendingEpisodeEvents = {};
-  const scoring = getScoring();
-  const activeChefs = getRoster().filter(c => (state.chefStatus||{})[c] !== "eliminated");
-  document.getElementById("episode-chef-events").innerHTML = activeChefs.map(chef => `
-    <div class="ep-chef-row">
-      <div class="ep-chef-name">${esc(chef)}</div>
-      <div class="event-grid">
-        ${Object.entries(scoring).map(([ev, pts]) =>
-          `<button class="event-btn" onclick="toggleEpisodeEvent(this,'${esc(chef)}','${esc(ev)}')">
-            ${esc(ev)} <span class="${pts>0?"event-pts-pos":"event-pts-neg"}">(${pts>0?"+":""}${pts})</span>
-          </button>`).join("")}
-      </div>
-    </div>`).join("");
+function makeSelect(id, chefs) {
+  return `<select id="${id}" class="ep-select"><option value="">— none —</option>${
+    chefs.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")
+  }</select>`;
 }
 
-window.toggleEpisodeEvent = function(btn, chef, ev) {
-  if (!pendingEpisodeEvents[chef]) pendingEpisodeEvents[chef] = [];
-  const idx = pendingEpisodeEvents[chef].indexOf(ev);
-  if (idx >= 0) { pendingEpisodeEvents[chef].splice(idx,1); btn.classList.remove("active"); }
-  else { pendingEpisodeEvents[chef].push(ev); btn.classList.add("active"); }
-};
+function makeRow(label, eventKey, id, chefs) {
+  const scoring = getScoring();
+  const pts = scoring[eventKey];
+  const ptsHtml = pts !== undefined
+    ? `<span class="ep-pts ${pts >= 0 ? "pos" : "neg"}">${pts > 0 ? "+" : ""}${pts}</span>`
+    : "";
+  return `<div class="ep-dropdown-row">
+    <label class="ep-dropdown-label">${label} ${ptsHtml}</label>
+    ${makeSelect(id, chefs)}
+  </div>`;
+}
+
+function populateDropdowns() {
+  const allChefs = getRoster();
+  const active = allChefs.filter(c => (state.chefStatus||{})[c] !== "eliminated");
+  const s = getScoring();
+
+  const html = `
+    <div class="ep-section-label">⚡ Quickfire</div>
+    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
+      ${makeRow("Winner", "Won Quickfire", "qf-winner", active)}
+      ${makeRow("Top 2", "Top Dishes", "qf-top2", active)}
+      ${makeRow("Top 3", "Top Dishes", "qf-top3", active)}
+    </div>
+
+    <div class="ep-section-label">🏆 Elimination Challenge</div>
+    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
+      ${makeRow("Winner", "Won Elimination", "el-winner", active)}
+      ${makeRow("Top dish", "Top Dishes", "el-top1", active)}
+      ${makeRow("Top dish", "Top Dishes", "el-top2", active)}
+      ${makeRow("Top dish", "Top Dishes", "el-top3", active)}
+      ${makeRow("Top dish", "Top Dishes", "el-top4", active)}
+      ${makeRow("Eliminated", "Eliminated", "el-elim", active)}
+    </div>
+
+    <div class="ep-section-label">🔪 Last Chance Kitchen</div>
+    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
+      ${makeRow("Winner", "Last Chance Kitchen Win", "lck-winner", allChefs)}
+      <div class="ep-dropdown-row">
+        <label class="ep-dropdown-label">Eliminated</label>
+        ${makeSelect("lck-loser", allChefs)}
+      </div>
+    </div>
+
+    <div class="ep-section-label">⭐ Fan Favorite</div>
+    <div class="ep-dropdown-grid">
+      ${makeRow("Fan Favorite", "Fan Favorite", "ff-winner", active)}
+    </div>
+  `;
+
+  document.getElementById("episode-dropdowns").innerHTML = html;
+}
+
+// Called when form opens
+function renderEpisodeChefList() {
+  populateDropdowns();
+}
 
 window.saveEpisode = function() {
   const name = document.getElementById("new-episode-input").value.trim();
   if (!name) { alert("Please enter an episode name."); return; }
-  state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events: {...pendingEpisodeEvents} }];
+
+  const get = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const events = {};
+
+  function addEvent(chef, ev) {
+    if (!chef) return;
+    if (!events[chef]) events[chef] = [];
+    if (!events[chef].includes(ev)) events[chef].push(ev);
+  }
+
+  // Quickfire
+  addEvent(get("qf-winner"), "Won Quickfire");
+  addEvent(get("qf-top2"),   "Top Dishes");
+  addEvent(get("qf-top3"),   "Top Dishes");
+
+  // Elimination
+  addEvent(get("el-winner"), "Won Elimination");
+  addEvent(get("el-top1"),   "Top Dishes");
+  addEvent(get("el-top2"),   "Top Dishes");
+  addEvent(get("el-top3"),   "Top Dishes");
+  addEvent(get("el-top4"),   "Top Dishes");
+  addEvent(get("el-elim"),   "Eliminated");
+
+  // Last Chance Kitchen
+  addEvent(get("lck-winner"), "Last Chance Kitchen Win");
+  // LCK loser — mark as eliminated if not already eliminated
+  const lckLoser = get("lck-loser");
+  if (lckLoser && (state.chefStatus||{})[lckLoser] !== "eliminated") {
+    addEvent(lckLoser, "Eliminated");
+  }
+
+  // Fan Favorite
+  addEvent(get("ff-winner"), "Fan Favorite");
+
+  // Auto-mark the elimination challenge eliminator
+  const elim = get("el-elim");
+  if (elim) {
+    state.chefStatus = { ...(state.chefStatus||{}), [elim]: "eliminated" };
+  }
+
+  state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events }];
   saveState();
   document.getElementById("new-episode-input").value = "";
   document.getElementById("add-episode-form").style.display = "none";
-  pendingEpisodeEvents = {};
 };
 
 window.cancelEpisode = function() {
   document.getElementById("add-episode-form").style.display = "none";
-  pendingEpisodeEvents = {};
 };
 
 function renderEpisodes() {
