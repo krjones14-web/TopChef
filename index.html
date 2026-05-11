@@ -350,11 +350,15 @@
       <!-- Manual Episode Form -->
       <!-- EPISODE FORM -->
       <div id="add-episode-form" class="inline-form" style="display:none;">
-        <div class="form-title">Log Episode</div>
+        <div class="form-title" id="episode-form-title">Log Episode</div>
         <input type="text" id="new-episode-input" placeholder="e.g. Episode 4 — Restaurant Wars" style="width:100%;margin-bottom:20px;">
 
         <div class="ep-section-label">⚡ Quickfire</div>
-        <div class="ep-dropdown-grid" id="qf-grid" style="margin-bottom:18px;"></div>
+        <div class="ep-dropdown-grid" id="qf-grid" style="margin-bottom:8px;"></div>
+        <div style="margin-bottom:18px;">
+          <button class="btn-ghost btn-sm" onclick="addQfRow('win')">+ Quickfire Winner</button>
+          <button class="btn-ghost btn-sm" onclick="addQfRow('top')" style="margin-left:8px;">+ Top dish</button>
+        </div>
 
         <div class="ep-section-label">🏆 Elimination Challenge</div>
         <div class="ep-dropdown-grid" id="el-grid" style="margin-bottom:8px;"></div>
@@ -367,7 +371,7 @@
         <div class="ep-dropdown-grid" id="ff-grid" style="margin-bottom:18px;"></div>
 
         <div class="form-row" style="margin-top:4px;">
-          <button class="btn" onclick="saveEpisode()">Save Episode</button>
+          <button class="btn" id="episode-save-btn" onclick="saveEpisode()">Save Episode</button>
           <button class="btn-ghost" onclick="cancelEpisode()">Cancel</button>
         </div>
       </div>
@@ -467,6 +471,7 @@ const DEFAULT_SCORING = {
   "Won Quickfire": 3,
   "Won Elimination": 5,
   "Top Dishes": 2,
+  "Middle": 0,
   "Last Chance Kitchen Win": 2,
   "Eliminated": -3,
   "Fan Favorite": 4,
@@ -886,6 +891,7 @@ window.confirmAiSuggestion = function() {
 
 // ─── EPISODES ────────────────────────────────────────────
 let elRows = []; // {type:'top'|'mid'|'elim'|'win', id}
+let editingEpisodeId = null; // id of episode being edited, or null for new
 let lckRows = []; // [{winnerId, loserId}]
 let elRowCounter = 0;
 let lckRowCounter = 0;
@@ -910,14 +916,39 @@ function makeRow(label, eventKey, selectId, chefs, removable) {
   </div>`;
 }
 
+let qfRows = [];
+let qfRowCounter = 0;
+
 function buildQfGrid() {
   const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  qfRows = [
+    {type:'win', id:'qf-win-0'},
+    {type:'top', id:'qf-top-0'},
+    {type:'top', id:'qf-top-1'},
+  ];
+  qfRowCounter = 1;
   document.getElementById('qf-grid').innerHTML = [
-    makeRow('Winner', 'Won Quickfire', 'qf-winner', active, false),
-    makeRow('Top 2', 'Top Dishes', 'qf-top2', active, false),
-    makeRow('Top 3', 'Top Dishes', 'qf-top3', active, false),
+    makeRow('Winner', 'Won Quickfire', 'qf-win-0', active, false),
+    makeRow('Top 2', 'Top Dishes', 'qf-top-0', active, true),
+    makeRow('Top 3', 'Top Dishes', 'qf-top-1', active, true),
   ].join('');
 }
+
+window.addQfRow = function(type) {
+  const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  const id = `qf-${type}-${++qfRowCounter}`;
+  const label = type === 'win' ? 'Winner' : 'Top dish';
+  const eventKey = type === 'win' ? 'Won Quickfire' : 'Top Dishes';
+  const newRow = document.createElement('div');
+  newRow.innerHTML = makeRow(label, eventKey, id, active, true);
+  document.getElementById('qf-grid').appendChild(newRow.firstElementChild);
+  qfRows.push({type, id});
+};
+
+window.removeQfRow = function(id) {
+  document.getElementById('row-' + id)?.remove();
+  qfRows = qfRows.filter(r => r.id !== id);
+};
 
 function buildElGrid() {
   const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
@@ -948,7 +979,7 @@ window.addElRow = function(type) {
   const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
   const id = `el-${type}-${elRowCounter++}`;
   const label = type === 'top' ? 'Top dish' : 'Middle';
-  const eventKey = type === 'top' ? 'Top Dishes' : '';
+  const eventKey = type === 'top' ? 'Top Dishes' : 'Middle';
   const newRow = document.createElement('div');
   newRow.innerHTML = makeRow(label, eventKey, id, active, true);
   // Insert before the Eliminated row
@@ -992,18 +1023,17 @@ window.saveEpisode = function() {
 
   function get(id) { const el = document.getElementById(id); return el ? el.value : ''; }
 
-  // Quickfire — all optional
-  addEvent(get('qf-winner'), 'Won Quickfire');
-  addEvent(get('qf-top2'), 'Top Dishes');
-  addEvent(get('qf-top3'), 'Top Dishes');
+  // Quickfire — all optional, dynamic rows
+  qfRows.forEach(r => {
+    const eventKey = r.type === 'win' ? 'Won Quickfire' : 'Top Dishes';
+    addEvent(get(r.id), eventKey);
+  });
 
   // Elimination
   addEvent(get('el-win'), 'Won Elimination');
   elRows.filter(r => r.type === 'top').forEach(r => addEvent(get(r.id), 'Top Dishes'));
-  // Middle rows — only award points if there's a custom "Middle" scoring event defined
-  if (scoring['Middle']) {
-    elRows.filter(r => r.type === 'mid').forEach(r => addEvent(get(r.id), 'Middle'));
-  }
+  // Middle rows — award points if 'Middle' scoring event exists
+  elRows.filter(r => r.type === 'mid').forEach(r => addEvent(get(r.id), 'Middle'));
   const elim = get('el-elim');
   addEvent(elim, 'Eliminated');
   if (elim) state.chefStatus = { ...(state.chefStatus||{}), [elim]: 'eliminated' };
@@ -1011,14 +1041,27 @@ window.saveEpisode = function() {
   // Fan Favorite
   addEvent(get('ff-winner'), 'Fan Favorite');
 
-  state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events }];
+  if (editingEpisodeId) {
+    // Replace existing episode
+    state.episodes = (state.episodes||[]).map(e =>
+      e.id === editingEpisodeId ? { ...e, name, events } : e
+    );
+    editingEpisodeId = null;
+  } else {
+    state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events }];
+  }
   saveState();
   document.getElementById('new-episode-input').value = '';
   document.getElementById('add-episode-form').style.display = 'none';
+  document.getElementById('episode-form-title').textContent = 'Log Episode';
+  document.getElementById('episode-save-btn').textContent = 'Save Episode';
 };
 
 window.cancelEpisode = function() {
   document.getElementById('add-episode-form').style.display = 'none';
+  editingEpisodeId = null;
+  document.getElementById('episode-form-title').textContent = 'Log Episode';
+  document.getElementById('episode-save-btn').textContent = 'Save Episode';
 };
 
 // ─── LCK ──────────────────────────────────────────────────
@@ -1121,7 +1164,10 @@ function renderEpisodes() {
     return `<div class="card" style="margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${rows?12:0}px;">
         <div style="font-size:15px;color:var(--text);display:flex;align-items:center;">${esc(ep.name)}${badge}</div>
-        <button class="btn-icon" onclick="deleteEpisode('${ep.id}')">✕</button>
+        <div style="display:flex;gap:4px;">
+          <button class="btn-ghost btn-sm" style="font-size:12px;" onclick="editEpisode('${ep.id}')">✏ Edit</button>
+          <button class="btn-icon" onclick="deleteEpisode('${ep.id}')">✕</button>
+        </div>
       </div>
       ${rows || `<div style="font-size:12px;color:var(--text3);">No events recorded</div>`}
     </div>`;
@@ -1132,6 +1178,92 @@ window.deleteEpisode = function(id) {
   if (!confirm("Delete this episode? Scores will be recalculated.")) return;
   state.episodes = state.episodes.filter(e => e.id !== id);
   saveState();
+};
+
+window.editEpisode = function(id) {
+  const ep = (state.episodes||[]).find(e => e.id === id);
+  if (!ep || ep.isLck) return; // LCK editing not supported yet
+
+  editingEpisodeId = id;
+
+  // Open the form
+  document.getElementById('add-lck-form').style.display = 'none';
+  document.getElementById('add-episode-form').style.display = 'block';
+  document.getElementById('episode-form-title').textContent = 'Edit Episode';
+  document.getElementById('episode-save-btn').textContent = 'Update Episode';
+
+  // Set episode name
+  document.getElementById('new-episode-input').value = ep.name;
+
+  // Rebuild grids fresh
+  buildQfGrid();
+  buildElGrid();
+  buildFfGrid();
+
+  // Helper to find chef with a given event in this episode
+  const events = ep.events || {};
+
+  // Pre-fill Quickfire
+  // Collect all chefs who Won Quickfire
+  const qfWinners = Object.entries(events).filter(([,evs]) => evs.includes('Won Quickfire')).map(([c]) => c);
+  const qfToppers = Object.entries(events).filter(([,evs]) => evs.includes('Top Dishes') && !evs.includes('Won Elimination')).map(([c]) => c);
+
+  // Fill existing QF winner row, add extra rows for extra winners
+  qfWinners.forEach((chef, i) => {
+    if (i === 0) {
+      const el = document.getElementById('qf-win-0');
+      if (el) el.value = chef;
+    } else {
+      addQfRow('win');
+      const el = document.getElementById(`qf-win-${qfRowCounter}`);
+      if (el) el.value = chef;
+    }
+  });
+
+  // Fill QF top dishes
+  qfToppers.forEach((chef, i) => {
+    if (i === 0) { const el = document.getElementById('qf-top-0'); if (el) el.value = chef; }
+    else if (i === 1) { const el = document.getElementById('qf-top-1'); if (el) el.value = chef; }
+    else { addQfRow('top'); const el = document.getElementById(`qf-top-${qfRowCounter}`); if (el) el.value = chef; }
+  });
+
+  // Pre-fill Elimination
+  const elWinner = Object.entries(events).find(([,evs]) => evs.includes('Won Elimination'));
+  if (elWinner) { const el = document.getElementById('el-win'); if (el) el.value = elWinner[0]; }
+
+  const elim = Object.entries(events).find(([,evs]) => evs.includes('Eliminated'));
+  if (elim) { const el = document.getElementById('el-elim'); if (el) el.value = elim[0]; }
+
+  // Top dishes in elimination (chefs who have Top Dishes but NOT Won Quickfire)
+  const elToppers = Object.entries(events)
+    .filter(([,evs]) => evs.includes('Top Dishes') && evs.includes('Won Elimination') === false && !evs.includes('Won Quickfire'))
+    .map(([c]) => c);
+  // Also include chef with Won Elimination + Top Dishes
+  const allElTop = Object.entries(events)
+    .filter(([c,evs]) => evs.includes('Top Dishes') && c !== (elWinner?.[0]))
+    .map(([c]) => c)
+    .filter(c => !qfToppers.includes(c));
+
+  allElTop.forEach((chef, i) => {
+    if (i === 0) { const el = document.getElementById('el-top-0'); if (el) el.value = chef; }
+    else if (i === 1) { const el = document.getElementById('el-top-1'); if (el) el.value = chef; }
+    else { addElRow('top'); const el = document.getElementById(`el-top-${elRowCounter-1}`); if (el) el.value = chef; }
+  });
+
+  // Middle
+  const midChefs = Object.entries(events).filter(([,evs]) => evs.includes('Middle')).map(([c]) => c);
+  midChefs.forEach(chef => {
+    addElRow('mid');
+    const el = document.getElementById(`el-mid-${elRowCounter-1}`);
+    if (el) el.value = chef;
+  });
+
+  // Fan Favorite
+  const ff = Object.entries(events).find(([,evs]) => evs.includes('Fan Favorite'));
+  if (ff) { const el = document.getElementById('ff-winner'); if (el) el.value = ff[0]; }
+
+  // Scroll to form
+  document.getElementById('add-episode-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
 // ─── CHEFS ────────────────────────────────────────────────
