@@ -378,7 +378,7 @@
 
       <!-- LCK FORM -->
       <div id="add-lck-form" class="inline-form" style="display:none;">
-        <div class="form-title">Log Last Chance Kitchen</div>
+        <div class="form-title" id="lck-form-title">Log Last Chance Kitchen</div>
         <input type="text" id="new-lck-input" placeholder="e.g. LCK Episodes 1-4" style="width:100%;margin-bottom:20px;">
         <div class="ep-section-label">🔪 Last Chance Kitchen</div>
         <p style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6;">Add one row per LCK episode. Winner earns LCK points, loser is eliminated from LCK.</p>
@@ -387,7 +387,7 @@
           <button class="btn-ghost btn-sm" onclick="addLckRow()">+ Add LCK Episode</button>
         </div>
         <div class="form-row">
-          <button class="btn" onclick="saveLck()">Save LCK</button>
+          <button class="btn" id="lck-save-btn" onclick="saveLck(null)">Save LCK</button>
           <button class="btn-ghost" onclick="cancelLck()">Cancel</button>
         </div>
       </div>
@@ -474,6 +474,7 @@ const DEFAULT_SCORING = {
   "Top 3 Elimination": 5,
   "Middle Elimination": 2,
   "Last Chance Kitchen Win": 2,
+  "Last Chance Kitchen Loss": -1,
   "Eliminated": -3,
   "Fan Favorite": 4,
 };
@@ -893,6 +894,7 @@ window.confirmAiSuggestion = function() {
 // ─── EPISODES ────────────────────────────────────────────
 let elRows = []; // {type:'top'|'mid'|'elim'|'win', id}
 let editingEpisodeId = null; // id of episode being edited, or null for new
+let editingLckId = null;
 let lckRows = []; // [{winnerId, loserId}]
 let elRowCounter = 0;
 let lckRowCounter = 0;
@@ -1110,38 +1112,93 @@ window.removeLckRow = function(idx) {
   lckRows = lckRows.filter(r => r.winId !== winId);
 };
 
-window.saveLck = function() {
+window.saveLck = function(editId) {
   const name = document.getElementById('new-lck-input').value.trim();
   if (!name) { alert('Please enter a name for these LCK episodes.'); return; }
 
+  // Store each LCK round as an array so multiple wins/losses stack correctly
   const events = {};
   function addEvent(chef, ev) {
     if (!chef) return;
     if (!events[chef]) events[chef] = [];
-    if (!events[chef].includes(ev)) events[chef].push(ev);
+    events[chef].push(ev); // Allow duplicates — multiple wins count multiple times
   }
 
   lckRows.forEach(({winId, loseId}) => {
     const winner = document.getElementById(winId)?.value;
     const loser  = document.getElementById(loseId)?.value;
-    addEvent(winner, 'Last Chance Kitchen Win');
-    // Loser gets no points but we track it for display
-    if (loser) {
-      if (!events[loser]) events[loser] = [];
-      // Don't add any point event for loser — LCK elimination doesn't cost points
-    }
+    if (winner) addEvent(winner, 'Last Chance Kitchen Win');
+    if (loser)  addEvent(loser,  'Last Chance Kitchen Loss');
   });
 
-  state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events, isLck: true }];
+  if (editId) {
+    state.episodes = (state.episodes||[]).map(e =>
+      e.id === editId ? { ...e, name, events } : e
+    );
+  } else {
+    state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events, isLck: true }];
+  }
   saveState();
   document.getElementById('new-lck-input').value = '';
   document.getElementById('add-lck-form').style.display = 'none';
   lckRows = [];
+  editingLckId = null;
 };
 
 window.cancelLck = function() {
   document.getElementById('add-lck-form').style.display = 'none';
   lckRows = [];
+  editingLckId = null;
+  const title = document.getElementById('lck-form-title');
+  if (title) title.textContent = 'Log Last Chance Kitchen';
+};
+
+window.editLck = function(id) {
+  const ep = (state.episodes||[]).find(e => e.id === id);
+  if (!ep || !ep.isLck) return;
+  editingLckId = id;
+
+  document.getElementById('add-episode-form').style.display = 'none';
+  document.getElementById('add-lck-form').style.display = 'block';
+  const title = document.getElementById('lck-form-title');
+  if (title) title.textContent = 'Edit Last Chance Kitchen';
+
+  document.getElementById('new-lck-input').value = ep.name;
+  lckRows = [];
+  lckRowCounter = 0;
+  document.getElementById('lck-rows').innerHTML = '';
+
+  // Rebuild rows from saved events
+  // Each win/loss pair corresponds to one row
+  const allChefs = getRoster();
+  const winners = [];
+  const losers = [];
+  Object.entries(ep.events||{}).forEach(([chef, evs]) => {
+    evs.forEach(ev => {
+      if (ev === 'Last Chance Kitchen Win') winners.push(chef);
+      if (ev === 'Last Chance Kitchen Loss') losers.push(chef);
+    });
+  });
+  const rowCount = Math.max(winners.length, losers.length, 1);
+  for (let i = 0; i < rowCount; i++) addLckRow();
+
+  // Pre-fill after DOM is built
+  setTimeout(() => {
+    winners.forEach((chef, i) => {
+      const el = document.getElementById(`lck-win-${i}`);
+      if (el) el.value = chef;
+    });
+    losers.forEach((chef, i) => {
+      const el = document.getElementById(`lck-lose-${i}`);
+      if (el) el.value = chef;
+    });
+  }, 50);
+
+  // Wire save button to pass edit id
+  const saveBtn = document.getElementById('lck-save-btn');
+  if (saveBtn) saveBtn.onclick = () => saveLck(editingLckId);
+
+  document.getElementById('add-lck-form').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 };
 
 // ─── EPISODES RENDER ─────────────────────────────────────
@@ -1183,7 +1240,8 @@ window.deleteEpisode = function(id) {
 
 window.editEpisode = function(id) {
   const ep = (state.episodes||[]).find(e => e.id === id);
-  if (!ep || ep.isLck) return; // LCK editing not supported yet
+  if (!ep) return;
+  if (ep.isLck) { editLck(id); return; }
 
   editingEpisodeId = id;
 
