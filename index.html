@@ -341,25 +341,54 @@
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button class="btn-ai btn-sm" onclick="startAiSuggestion()">✦ AI Suggest Scores</button>
-          <button class="btn btn-sm" onclick="toggleForm('add-episode-form')">+ Log Manually</button>
+          <button class="btn btn-sm" onclick="openEpisodeForm()">+ Log Episode</button>
+          <button class="btn-ghost btn-sm" onclick="openLckForm()">+ Log LCK</button>
         </div>
       </div>
       <!-- AI Panel -->
       <div id="ai-panel" style="display:none;"></div>
       <!-- Manual Episode Form -->
+      <!-- EPISODE FORM -->
       <div id="add-episode-form" class="inline-form" style="display:none;">
-        <div class="form-title">Log New Episode</div>
+        <div class="form-title">Log Episode</div>
         <input type="text" id="new-episode-input" placeholder="e.g. Episode 4 — Restaurant Wars" style="width:100%;margin-bottom:20px;">
 
-        <!-- Dropdowns built by populateDropdowns() -->
-        <div id="episode-dropdowns"></div>
+        <div class="ep-section-label">⚡ Quickfire</div>
+        <div class="ep-dropdown-grid" id="qf-grid" style="margin-bottom:18px;"></div>
 
-        <div class="form-row" style="margin-top:20px;">
+        <div class="ep-section-label">🏆 Elimination Challenge</div>
+        <div class="ep-dropdown-grid" id="el-grid" style="margin-bottom:8px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:18px;flex-wrap:wrap;">
+          <button class="btn-ghost btn-sm" onclick="addElRow('top')">+ Top dish</button>
+          <button class="btn-ghost btn-sm" onclick="addElRow('mid')">+ Middle</button>
+        </div>
+
+        <div class="ep-section-label">⭐ Fan Favorite</div>
+        <div class="ep-dropdown-grid" id="ff-grid" style="margin-bottom:18px;"></div>
+
+        <div class="form-row" style="margin-top:4px;">
           <button class="btn" onclick="saveEpisode()">Save Episode</button>
           <button class="btn-ghost" onclick="cancelEpisode()">Cancel</button>
         </div>
       </div>
-      <div id="episodes-list">
+
+      <!-- LCK FORM -->
+      <div id="add-lck-form" class="inline-form" style="display:none;">
+        <div class="form-title">Log Last Chance Kitchen</div>
+        <input type="text" id="new-lck-input" placeholder="e.g. LCK Episodes 1-4" style="width:100%;margin-bottom:20px;">
+        <div class="ep-section-label">🔪 Last Chance Kitchen</div>
+        <p style="font-size:12px;color:var(--text3);margin-bottom:12px;line-height:1.6;">Add one row per LCK episode. Winner earns LCK points, loser is eliminated from LCK.</p>
+        <div id="lck-rows" class="ep-dropdown-grid" style="gap:12px;margin-bottom:10px;"></div>
+        <div style="margin-bottom:18px;">
+          <button class="btn-ghost btn-sm" onclick="addLckRow()">+ Add LCK Episode</button>
+        </div>
+        <div class="form-row">
+          <button class="btn" onclick="saveLck()">Save LCK</button>
+          <button class="btn-ghost" onclick="cancelLck()">Cancel</button>
+        </div>
+      </div>
+
+            <div id="episodes-list">
         <div class="empty"><div class="empty-icon">📺</div><div>No episodes logged yet.</div></div>
       </div>
     </div>
@@ -855,76 +884,104 @@ window.confirmAiSuggestion = function() {
   document.querySelector("nav button").click();
 };
 
-// ─── EPISODES (MANUAL) ────────────────────────────────────
-function makeSelect(id, chefs) {
-  return `<select id="${id}" class="ep-select"><option value="">— none —</option>${
-    chefs.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join("")
-  }</select>`;
+// ─── EPISODES ────────────────────────────────────────────
+let elRows = []; // {type:'top'|'mid'|'elim'|'win', id}
+let lckRows = []; // [{winnerId, loserId}]
+let elRowCounter = 0;
+let lckRowCounter = 0;
+
+function chefOptions(chefs) {
+  return '<option value="">— none —</option>' +
+    chefs.map(c => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
 }
 
-function makeRow(label, eventKey, id, chefs) {
+function ptsLabel(eventKey) {
   const scoring = getScoring();
   const pts = scoring[eventKey];
-  const ptsHtml = pts !== undefined
-    ? `<span class="ep-pts ${pts >= 0 ? "pos" : "neg"}">${pts > 0 ? "+" : ""}${pts}</span>`
-    : "";
-  return `<div class="ep-dropdown-row">
-    <label class="ep-dropdown-label">${label} ${ptsHtml}</label>
-    ${makeSelect(id, chefs)}
+  if (pts === undefined) return '';
+  return `<span class="ep-pts ${pts >= 0 ? 'pos' : 'neg'}">${pts > 0 ? '+' : ''}${pts}</span>`;
+}
+
+function makeRow(label, eventKey, selectId, chefs, removable) {
+  return `<div class="ep-dropdown-row" id="row-${selectId}">
+    <label class="ep-dropdown-label">${label} ${ptsLabel(eventKey)}</label>
+    <select id="${selectId}" class="ep-select">${chefOptions(chefs)}</select>
+    ${removable ? `<button class="btn-icon" onclick="removeElRow('${selectId}')" title="Remove">✕</button>` : ''}
   </div>`;
 }
 
-function populateDropdowns() {
-  const allChefs = getRoster();
-  const active = allChefs.filter(c => (state.chefStatus||{})[c] !== "eliminated");
-  const s = getScoring();
-
-  const html = `
-    <div class="ep-section-label">⚡ Quickfire</div>
-    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
-      ${makeRow("Winner", "Won Quickfire", "qf-winner", active)}
-      ${makeRow("Top 2", "Top Dishes", "qf-top2", active)}
-      ${makeRow("Top 3", "Top Dishes", "qf-top3", active)}
-    </div>
-
-    <div class="ep-section-label">🏆 Elimination Challenge</div>
-    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
-      ${makeRow("Winner", "Won Elimination", "el-winner", active)}
-      ${makeRow("Top dish", "Top Dishes", "el-top1", active)}
-      ${makeRow("Top dish", "Top Dishes", "el-top2", active)}
-      ${makeRow("Top dish", "Top Dishes", "el-top3", active)}
-      ${makeRow("Top dish", "Top Dishes", "el-top4", active)}
-      ${makeRow("Eliminated", "Eliminated", "el-elim", active)}
-    </div>
-
-    <div class="ep-section-label">🔪 Last Chance Kitchen</div>
-    <div class="ep-dropdown-grid" style="margin-bottom:18px;">
-      ${makeRow("Winner", "Last Chance Kitchen Win", "lck-winner", allChefs)}
-      <div class="ep-dropdown-row">
-        <label class="ep-dropdown-label">Eliminated</label>
-        ${makeSelect("lck-loser", allChefs)}
-      </div>
-    </div>
-
-    <div class="ep-section-label">⭐ Fan Favorite</div>
-    <div class="ep-dropdown-grid">
-      ${makeRow("Fan Favorite", "Fan Favorite", "ff-winner", active)}
-    </div>
-  `;
-
-  document.getElementById("episode-dropdowns").innerHTML = html;
+function buildQfGrid() {
+  const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  document.getElementById('qf-grid').innerHTML = [
+    makeRow('Winner', 'Won Quickfire', 'qf-winner', active, false),
+    makeRow('Top 2', 'Top Dishes', 'qf-top2', active, false),
+    makeRow('Top 3', 'Top Dishes', 'qf-top3', active, false),
+  ].join('');
 }
 
-// Called when form opens
-function renderEpisodeChefList() {
-  populateDropdowns();
+function buildElGrid() {
+  const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  const grid = document.getElementById('el-grid');
+  // Always start with winner, 2 top slots, and eliminated
+  elRows = [
+    {type:'win', id:'el-win'},
+    {type:'top', id:'el-top-0'},
+    {type:'top', id:'el-top-1'},
+    {type:'elim', id:'el-elim'},
+  ];
+  elRowCounter = 2;
+  grid.innerHTML = [
+    makeRow('Winner', 'Won Elimination', 'el-win', active, false),
+    makeRow('Top dish', 'Top Dishes', 'el-top-0', active, true),
+    makeRow('Top dish', 'Top Dishes', 'el-top-1', active, true),
+    makeRow('Eliminated', 'Eliminated', 'el-elim', active, false),
+  ].join('');
 }
+
+function buildFfGrid() {
+  const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  document.getElementById('ff-grid').innerHTML =
+    makeRow('Fan Favorite', 'Fan Favorite', 'ff-winner', active, false);
+}
+
+window.addElRow = function(type) {
+  const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
+  const id = `el-${type}-${elRowCounter++}`;
+  const label = type === 'top' ? 'Top dish' : 'Middle';
+  const eventKey = type === 'top' ? 'Top Dishes' : '';
+  const newRow = document.createElement('div');
+  newRow.innerHTML = makeRow(label, eventKey, id, active, true);
+  // Insert before the Eliminated row
+  const grid = document.getElementById('el-grid');
+  const elimRow = document.getElementById('row-el-elim');
+  grid.insertBefore(newRow.firstElementChild, elimRow);
+  elRows.push({type, id});
+};
+
+window.removeElRow = function(id) {
+  document.getElementById('row-' + id)?.remove();
+  elRows = elRows.filter(r => r.id !== id);
+};
+
+function openEpisodeForm() {
+  // Close LCK form if open
+  document.getElementById('add-lck-form').style.display = 'none';
+  const form = document.getElementById('add-episode-form');
+  const showing = form.style.display !== 'none';
+  form.style.display = showing ? 'none' : 'block';
+  if (!showing) {
+    buildQfGrid();
+    buildElGrid();
+    buildFfGrid();
+    setTimeout(() => document.getElementById('new-episode-input').focus(), 50);
+  }
+}
+window.openEpisodeForm = openEpisodeForm;
 
 window.saveEpisode = function() {
-  const name = document.getElementById("new-episode-input").value.trim();
-  if (!name) { alert("Please enter an episode name."); return; }
-
-  const get = id => { const el = document.getElementById(id); return el ? el.value : ""; };
+  const name = document.getElementById('new-episode-input').value.trim();
+  if (!name) { alert('Please enter an episode name.'); return; }
+  const scoring = getScoring();
   const events = {};
 
   function addEvent(chef, ev) {
@@ -933,46 +990,117 @@ window.saveEpisode = function() {
     if (!events[chef].includes(ev)) events[chef].push(ev);
   }
 
-  // Quickfire
-  addEvent(get("qf-winner"), "Won Quickfire");
-  addEvent(get("qf-top2"),   "Top Dishes");
-  addEvent(get("qf-top3"),   "Top Dishes");
+  function get(id) { const el = document.getElementById(id); return el ? el.value : ''; }
+
+  // Quickfire — all optional
+  addEvent(get('qf-winner'), 'Won Quickfire');
+  addEvent(get('qf-top2'), 'Top Dishes');
+  addEvent(get('qf-top3'), 'Top Dishes');
 
   // Elimination
-  addEvent(get("el-winner"), "Won Elimination");
-  addEvent(get("el-top1"),   "Top Dishes");
-  addEvent(get("el-top2"),   "Top Dishes");
-  addEvent(get("el-top3"),   "Top Dishes");
-  addEvent(get("el-top4"),   "Top Dishes");
-  addEvent(get("el-elim"),   "Eliminated");
-
-  // Last Chance Kitchen
-  addEvent(get("lck-winner"), "Last Chance Kitchen Win");
-  // LCK loser — mark as eliminated if not already eliminated
-  const lckLoser = get("lck-loser");
-  if (lckLoser && (state.chefStatus||{})[lckLoser] !== "eliminated") {
-    addEvent(lckLoser, "Eliminated");
+  addEvent(get('el-win'), 'Won Elimination');
+  elRows.filter(r => r.type === 'top').forEach(r => addEvent(get(r.id), 'Top Dishes'));
+  // Middle rows — only award points if there's a custom "Middle" scoring event defined
+  if (scoring['Middle']) {
+    elRows.filter(r => r.type === 'mid').forEach(r => addEvent(get(r.id), 'Middle'));
   }
+  const elim = get('el-elim');
+  addEvent(elim, 'Eliminated');
+  if (elim) state.chefStatus = { ...(state.chefStatus||{}), [elim]: 'eliminated' };
 
   // Fan Favorite
-  addEvent(get("ff-winner"), "Fan Favorite");
-
-  // Auto-mark the elimination challenge eliminator
-  const elim = get("el-elim");
-  if (elim) {
-    state.chefStatus = { ...(state.chefStatus||{}), [elim]: "eliminated" };
-  }
+  addEvent(get('ff-winner'), 'Fan Favorite');
 
   state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events }];
   saveState();
-  document.getElementById("new-episode-input").value = "";
-  document.getElementById("add-episode-form").style.display = "none";
+  document.getElementById('new-episode-input').value = '';
+  document.getElementById('add-episode-form').style.display = 'none';
 };
 
 window.cancelEpisode = function() {
-  document.getElementById("add-episode-form").style.display = "none";
+  document.getElementById('add-episode-form').style.display = 'none';
 };
 
+// ─── LCK ──────────────────────────────────────────────────
+function openLckForm() {
+  document.getElementById('add-episode-form').style.display = 'none';
+  const form = document.getElementById('add-lck-form');
+  const showing = form.style.display !== 'none';
+  form.style.display = showing ? 'none' : 'block';
+  if (!showing) {
+    lckRows = [];
+    lckRowCounter = 0;
+    document.getElementById('lck-rows').innerHTML = '';
+    addLckRow(); // start with one row
+    setTimeout(() => document.getElementById('new-lck-input').focus(), 50);
+  }
+}
+window.openLckForm = openLckForm;
+
+window.addLckRow = function() {
+  const allChefs = getRoster();
+  const idx = lckRowCounter++;
+  const winId = `lck-win-${idx}`;
+  const loseId = `lck-lose-${idx}`;
+  lckRows.push({winId, loseId});
+
+  const row = document.createElement('div');
+  row.id = `lck-row-${idx}`;
+  row.style.cssText = 'background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:12px;';
+  row.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+      <div style="font-size:11px;letter-spacing:2px;color:var(--text3);text-transform:uppercase;">Episode ${idx + 1}</div>
+      ${idx > 0 ? `<button class="btn-icon" onclick="removeLckRow(${idx})">✕</button>` : ''}
+    </div>
+    ${makeRow('Winner', 'Last Chance Kitchen Win', winId, allChefs, false)}
+    <div style="margin-top:8px;">
+    ${makeRow('Loser', '', loseId, allChefs, false)}
+    </div>`;
+  document.getElementById('lck-rows').appendChild(row);
+};
+
+window.removeLckRow = function(idx) {
+  document.getElementById(`lck-row-${idx}`)?.remove();
+  const winId = `lck-win-${idx}`;
+  const loseId = `lck-lose-${idx}`;
+  lckRows = lckRows.filter(r => r.winId !== winId);
+};
+
+window.saveLck = function() {
+  const name = document.getElementById('new-lck-input').value.trim();
+  if (!name) { alert('Please enter a name for these LCK episodes.'); return; }
+
+  const events = {};
+  function addEvent(chef, ev) {
+    if (!chef) return;
+    if (!events[chef]) events[chef] = [];
+    if (!events[chef].includes(ev)) events[chef].push(ev);
+  }
+
+  lckRows.forEach(({winId, loseId}) => {
+    const winner = document.getElementById(winId)?.value;
+    const loser  = document.getElementById(loseId)?.value;
+    addEvent(winner, 'Last Chance Kitchen Win');
+    // Loser gets no points but we track it for display
+    if (loser) {
+      if (!events[loser]) events[loser] = [];
+      // Don't add any point event for loser — LCK elimination doesn't cost points
+    }
+  });
+
+  state.episodes = [...(state.episodes||[]), { id: Date.now().toString(), name, events, isLck: true }];
+  saveState();
+  document.getElementById('new-lck-input').value = '';
+  document.getElementById('add-lck-form').style.display = 'none';
+  lckRows = [];
+};
+
+window.cancelLck = function() {
+  document.getElementById('add-lck-form').style.display = 'none';
+  lckRows = [];
+};
+
+// ─── EPISODES RENDER ─────────────────────────────────────
 function renderEpisodes() {
   const scoring = getScoring();
   const list = document.getElementById("episodes-list");
@@ -982,14 +1110,17 @@ function renderEpisodes() {
     return;
   }
   list.innerHTML = eps.map(ep => {
+    const badge = ep.isLck
+      ? `<span style="font-size:10px;background:#0a1a2a;border:1px solid #1a3a5a;color:#5a9aca;padding:2px 8px;border-radius:10px;margin-left:8px;letter-spacing:1px;">LCK</span>`
+      : '';
     const rows = Object.entries(ep.events||{}).filter(([,evs])=>evs.length).map(([chef,evs])=>
       `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-        <span style="color:var(--accent2);width:110px;font-size:12px;flex-shrink:0;">${esc(chef)}</span>
-        <div>${evs.map(ev=>`<span class="event-tag ${(scoring[ev]||0)>0?"pos":"neg"}">${esc(ev)}</span>`).join(" ")}</div>
+        <span style="color:var(--accent2);width:130px;font-size:12px;flex-shrink:0;">${esc(chef)}</span>
+        <div>${evs.map(ev=>`<span class="event-tag ${(scoring[ev]||0)>=0?"pos":"neg"}">${esc(ev)}</span>`).join(" ")}</div>
       </div>`).join("");
     return `<div class="card" style="margin-bottom:12px;">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:${rows?12:0}px;">
-        <div style="font-size:15px;color:var(--text);">${esc(ep.name)}</div>
+        <div style="font-size:15px;color:var(--text);display:flex;align-items:center;">${esc(ep.name)}${badge}</div>
         <button class="btn-icon" onclick="deleteEpisode('${ep.id}')">✕</button>
       </div>
       ${rows || `<div style="font-size:12px;color:var(--text3);">No events recorded</div>`}
