@@ -469,9 +469,10 @@ const CHEFS = [
 
 const DEFAULT_SCORING = {
   "Won Quickfire": 3,
-  "Won Elimination": 5,
-  "Top Dishes": 2,
-  "Middle": 0,
+  "Won Elimination": 10,
+  "Top 3 Quick Fire": 1,
+  "Top 3 Elimination": 5,
+  "Middle Elimination": 2,
   "Last Chance Kitchen Win": 2,
   "Eliminated": -3,
   "Fan Favorite": 4,
@@ -929,8 +930,8 @@ function buildQfGrid() {
   qfRowCounter = 1;
   document.getElementById('qf-grid').innerHTML = [
     makeRow('Winner', 'Won Quickfire', 'qf-win-0', active, false),
-    makeRow('Top 2', 'Top Dishes', 'qf-top-0', active, true),
-    makeRow('Top 3', 'Top Dishes', 'qf-top-1', active, true),
+    makeRow('Top 2', 'Top 3 Quick Fire', 'qf-top-0', active, true),
+    makeRow('Top 3', 'Top 3 Quick Fire', 'qf-top-1', active, true),
   ].join('');
 }
 
@@ -938,7 +939,7 @@ window.addQfRow = function(type) {
   const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
   const id = `qf-${type}-${++qfRowCounter}`;
   const label = type === 'win' ? 'Winner' : 'Top dish';
-  const eventKey = type === 'win' ? 'Won Quickfire' : 'Top Dishes';
+  const eventKey = type === 'win' ? 'Won Quickfire' : 'Top 3 Quick Fire';
   const newRow = document.createElement('div');
   newRow.innerHTML = makeRow(label, eventKey, id, active, true);
   document.getElementById('qf-grid').appendChild(newRow.firstElementChild);
@@ -963,8 +964,8 @@ function buildElGrid() {
   elRowCounter = 2;
   grid.innerHTML = [
     makeRow('Winner', 'Won Elimination', 'el-win', active, false),
-    makeRow('Top dish', 'Top Dishes', 'el-top-0', active, true),
-    makeRow('Top dish', 'Top Dishes', 'el-top-1', active, true),
+    makeRow('Top dish', 'Top 3 Elimination', 'el-top-0', active, true),
+    makeRow('Top dish', 'Top 3 Elimination', 'el-top-1', active, true),
     makeRow('Eliminated', 'Eliminated', 'el-elim', active, false),
   ].join('');
 }
@@ -979,7 +980,7 @@ window.addElRow = function(type) {
   const active = getRoster().filter(c => (state.chefStatus||{})[c] !== 'eliminated');
   const id = `el-${type}-${elRowCounter++}`;
   const label = type === 'top' ? 'Top dish' : 'Middle';
-  const eventKey = type === 'top' ? 'Top Dishes' : 'Middle';
+  const eventKey = type === 'top' ? 'Top 3 Elimination' : 'Middle Elimination';
   const newRow = document.createElement('div');
   newRow.innerHTML = makeRow(label, eventKey, id, active, true);
   // Insert before the Eliminated row
@@ -1025,15 +1026,15 @@ window.saveEpisode = function() {
 
   // Quickfire — all optional, dynamic rows
   qfRows.forEach(r => {
-    const eventKey = r.type === 'win' ? 'Won Quickfire' : 'Top Dishes';
+    const eventKey = r.type === 'win' ? 'Won Quickfire' : 'Top 3 Quick Fire';
     addEvent(get(r.id), eventKey);
   });
 
   // Elimination
   addEvent(get('el-win'), 'Won Elimination');
-  elRows.filter(r => r.type === 'top').forEach(r => addEvent(get(r.id), 'Top Dishes'));
+  elRows.filter(r => r.type === 'top').forEach(r => addEvent(get(r.id), 'Top 3 Elimination'));
   // Middle rows — award points if 'Middle' scoring event exists
-  elRows.filter(r => r.type === 'mid').forEach(r => addEvent(get(r.id), 'Middle'));
+  elRows.filter(r => r.type === 'mid').forEach(r => addEvent(get(r.id), 'Middle Elimination'));
   const elim = get('el-elim');
   addEvent(elim, 'Eliminated');
   if (elim) state.chefStatus = { ...(state.chefStatus||{}), [elim]: 'eliminated' };
@@ -1206,7 +1207,7 @@ window.editEpisode = function(id) {
   // Pre-fill Quickfire
   // Collect all chefs who Won Quickfire
   const qfWinners = Object.entries(events).filter(([,evs]) => evs.includes('Won Quickfire')).map(([c]) => c);
-  const qfToppers = Object.entries(events).filter(([,evs]) => evs.includes('Top Dishes') && !evs.includes('Won Elimination')).map(([c]) => c);
+  const qfToppers = Object.entries(events).filter(([,evs]) => evs.includes('Top 3 Elimination')).map(([c]) => c);
 
   // Fill existing QF winner row, add extra rows for extra winners
   qfWinners.forEach((chef, i) => {
@@ -1236,11 +1237,11 @@ window.editEpisode = function(id) {
 
   // Top dishes in elimination (chefs who have Top Dishes but NOT Won Quickfire)
   const elToppers = Object.entries(events)
-    .filter(([,evs]) => evs.includes('Top Dishes') && evs.includes('Won Elimination') === false && !evs.includes('Won Quickfire'))
+    .filter(([,evs]) => evs.includes('Top 3 Elimination'))
     .map(([c]) => c);
   // Also include chef with Won Elimination + Top Dishes
   const allElTop = Object.entries(events)
-    .filter(([c,evs]) => evs.includes('Top Dishes') && c !== (elWinner?.[0]))
+    .filter(([c,evs]) => evs.includes('Top 3 Elimination') && c !== (elWinner?.[0]))
     .map(([c]) => c)
     .filter(c => !qfToppers.includes(c));
 
@@ -1251,7 +1252,7 @@ window.editEpisode = function(id) {
   });
 
   // Middle
-  const midChefs = Object.entries(events).filter(([,evs]) => evs.includes('Middle')).map(([c]) => c);
+  const midChefs = Object.entries(events).filter(([,evs]) => evs.includes('Middle Elimination')).map(([c]) => c);
   midChefs.forEach(chef => {
     addElRow('mid');
     const el = document.getElementById(`el-mid-${elRowCounter-1}`);
@@ -1276,8 +1277,10 @@ function renderChefs() {
     return `<div class="chef-card ${elim?"eliminated":""}">
       <div class="chef-emoji">${elim?"❌":"👨‍🍳"}</div>
       <div class="chef-name">${esc(chef)}</div>
-      <button style="padding:3px 10px;font-size:10px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:${elim?"var(--text3)":"var(--red2)"};cursor:${elim?"default":"pointer"};letter-spacing:1px;font-family:'Crimson Text',serif;"
-        ${elim?"disabled":""} onclick="${elim?"":"eliminateChef('"+esc(chef)+"')"}">${elim?"OUT":"ELIMINATE"}</button>
+      ${elim
+        ? `<button style="padding:3px 10px;font-size:10px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--accent);cursor:pointer;letter-spacing:1px;font-family:'Crimson Text',serif;" onclick="unEliminateChef('${esc(chef)}')">UNDO</button>`
+        : `<button style="padding:3px 10px;font-size:10px;border-radius:4px;border:1px solid var(--border2);background:transparent;color:var(--red2);cursor:pointer;letter-spacing:1px;font-family:'Crimson Text',serif;" onclick="eliminateChef('${esc(chef)}')">ELIMINATE</button>`
+      }
     </div>`;
   }).join("");
 }
@@ -1285,6 +1288,12 @@ function renderChefs() {
 window.eliminateChef = function(chef) {
   if (!confirm(`Eliminate ${chef}?`)) return;
   state.chefStatus = { ...(state.chefStatus||{}), [chef]: "eliminated" };
+  saveState();
+};
+
+window.unEliminateChef = function(chef) {
+  if (!confirm(`Mark ${chef} as active again?`)) return;
+  state.chefStatus = { ...(state.chefStatus||{}), [chef]: "active" };
   saveState();
 };
 
